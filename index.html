@@ -83,7 +83,7 @@ p{margin:0}
 .top .date{font-size:13px;color:var(--hero-mute)}
 .band .sync{background:rgba(255,255,255,.16);border-color:transparent;color:#fff}
 .band .iconbtn{background:rgba(255,255,255,.16);border-color:transparent;color:#fff}
-.sync{display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:var(--mute);padding:6px 10px;border-radius:99px;background:var(--surface);border:1px solid var(--line)}
+.sync{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;font-size:12px;font-weight:600;color:var(--mute);padding:6px 10px;border-radius:99px;background:var(--surface);border:1px solid var(--line)}
 .sync i{width:7px;height:7px;border-radius:50%;background:#5BE3A0}
 .sync.saving i{background:var(--gold)} .sync.offline i,.sync.error i{background:#FF8A8A}
 .iconbtn{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:var(--surface);border:1px solid var(--line);flex:none;color:var(--ink)}
@@ -383,8 +383,8 @@ input[type=date],input[type=month]{min-width:0;max-width:100%}
 
 /* ===== Paste your two values here (see the setup guide). Both are safe to publish. ===== */
 const APP = {
-  scriptUrl: 'https://script.google.com/macros/s/AKfycbx6J_w5a6mdLakWkfAMyGmq7MR45F7A17LycZN5GMklWALPiAtcGeiYXDaMTXvUxVKe/exec',
-  clientId: '1013627644783-b29g2phqkvq840clrd0p8fjl4tn4q9aa.apps.googleusercontent.com'
+  scriptUrl: 'PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL',
+  clientId: 'PASTE_YOUR_CLIENT_ID.apps.googleusercontent.com'
 };
 const CONFIGURED = !/PASTE_/.test(APP.scriptUrl + APP.clientId);
 const COOL_OFF_DAYS = 3;        // wishlist waiting period
@@ -617,7 +617,7 @@ async function api(action, payload = {}, timeoutMs = 25000) {
 function setSync(s) { S.sync = s; const el = $('#sync'); if (el) el.outerHTML = syncPill(); }
 function syncPill() {
   const n = S.outbox.length;
-  if (S.sync === 'signin') return `<button class="sync error" id="sync" data-act="signin-again"><i></i>Sign in to sync${n ? ` (${n})` : ''}</button>`;
+  if (S.sync === 'signin') return `<button class="sync error" id="sync" data-act="signin-again"><i></i>Sign in${n ? ` (${n})` : ''}</button>`;
   const txt = S.sync === 'saving' ? 'Saving…' : S.sync === 'offline' ? `Offline${n ? `, ${n} waiting` : ''}` : S.sync === 'error' ? 'Sync problem' : (n ? `${n} waiting` : 'Synced');
   return `<button class="sync ${S.sync}" id="sync" data-act="sync-now" title="Tap to sync now"><i></i>${txt}</button>`;
 }
@@ -803,7 +803,7 @@ function viewToday() {
       <section class="card">
         <div class="card-h"><div><h2>Today</h2><p>${todays.length ? `${todays.length} entr${todays.length > 1 ? 'ies' : 'y'}. Tap one to edit.` : 'Nothing logged yet'}</p></div><b class="num" style="font-family:var(--display);font-size:22px">${rp(spentToday)}</b></div>
         ${freq.length ? `<p class="small mute" style="margin-bottom:8px">Tap to log again</p><div class="chips" style="margin-bottom:10px">${freq.map((f, i) => `<button class="chip" data-act="quick" data-i="${i}">${esc(f.item)} <small>${short(f.amount)}</small></button>`).join('')}</div>` : ''}
-        ${todays.length ? todays.map(expRow).join('') : `<div class="empty">Log your first expense with the yellow + button. Typing <b>bakso 25k, parkir 2k</b> works.</div>`}
+        ${todays.length ? todays.map(expRow).join('') : `<div class="empty">Log your first expense with the blue AI button. Typing <b>bakso 25k, parkir 2k</b> works.</div>`}
         <div class="row" style="margin-top:12px"><button class="btn sm ghost" data-act="income-new">${ic('income', 16)}Add income</button><button class="btn sm ghost" data-act="tab" data-tab="calendar">${ic('calendar', 16)}Calendar</button></div>
       </section>
     </div>
@@ -868,23 +868,30 @@ function countCard(k) {
     <div class="between"><div><small class="mute small" style="font-weight:600">The app expects</small><div class="num" style="font-size:22px;font-weight:800">${rp(k.shouldHave)}</div></div><button class="btn" data-act="count">Count now</button></div></section>`;
 }
 function foodLine(k) { return k.lines.find(l => l.track === 'day' && l.total > 0); }
+/* Food with carry-over: every day gets the daily target PLUS whatever was left from earlier days
+   (or MINUS whatever was overspent). A cheap day makes tomorrow bigger; an expensive day makes it smaller. */
 function foodStats(k) {
   const f = foodLine(k); if (!f) return null;
-  const target = f.qty > 1 ? f.unit : f.total / k.days;
-  const s = dailySeries(k, f.name), ti = k.elapsed - 1;
-  let streak = 0; for (let i = ti - 1; i >= 0 && s[i] <= target; i--) streak++;
-  const jar = sumA(s.slice(0, Math.max(0, ti)).map(v => Math.max(0, target - v)));
-  const overDays = s.slice(0, Math.max(0, ti)).filter(v => v > target).length;
-  return { f, target, s, ti, today: k.isCur ? s[ti] || 0 : 0, streak, jar, overDays };
+  const target = f.qty > 1 ? f.unit : f.base / k.days;
+  const s = dailySeries(k, f.name), ti = k.isCur ? k.elapsed - 1 : k.days;
+  const avail = [], over = []; let carry = f.topUp || 0;          // a top-up for Food starts as extra carry
+  for (let i = 0; i < k.days; i++) { avail[i] = target + carry; over[i] = s[i] > avail[i]; carry = avail[i] - s[i]; }
+  const pastN = k.isCur ? ti : k.days;                            // days that are completely over
+  let streak = 0; for (let i = pastN - 1; i >= 0 && !over[i]; i--) streak++;
+  const overDays = over.slice(0, pastN).filter(Boolean).length;
+  const todayBudget = k.isCur ? avail[ti] : 0, carryIn = k.isCur ? avail[ti] - target : carry;
+  let endCarry = f.topUp || 0; for (let i = 0; i < k.days; i++) endCarry += target - s[i];
+  return { f, target, s, avail, over, ti, pastN, streak, overDays, todayBudget, carryIn, today: k.isCur ? s[ti] || 0 : 0, endCarry };
 }
+const carryText = c => c > 0 ? `+${rp(c)} carried over from earlier days` : c < 0 ? `−${rp(-c)} because earlier days went over` : `nothing carried over`;
 function foodCard(k) {
   const st = foodStats(k); if (!st || !k.daysLeft) return '';
-  const left = st.target - st.today, w = clamp(st.today / st.target * 100, 0, 100);
+  const budget = st.todayBudget, left = budget - st.today, w = budget > 0 ? clamp(st.today / budget * 100, 0, 100) : 100;
   return `<section class="card">
-    <div class="card-h"><div><h2>${esc(st.f.name)} today</h2><p>Target ${rp(st.target)} a day</p></div><span class="pill ${left < 0 ? 'over' : 'ok'}">${left < 0 ? 'Over' : 'Within'}</span></div>
-    <div class="between"><b class="num" style="font-family:var(--display);font-size:28px">${rp(st.today)}</b><span class="small mute">${left >= 0 ? `${rp(left)} left` : `${rp(-left)} over`}</span></div>
+    <div class="card-h"><div><h2>${esc(st.f.name)} today</h2><p>Today's budget <b style="color:var(--ink)">${rp(budget)}</b></p></div><span class="pill ${left < 0 ? 'over' : 'ok'}">${left < 0 ? 'Over' : 'Within'}</span></div>
+    <div class="between"><b class="num" style="font-size:28px;font-weight:800">${rp(st.today)}</b><span class="small mute">${left >= 0 ? `${rp(left)} left` : `${rp(-left)} over`}</span></div>
     <div class="bar" style="margin-top:8px"><i style="width:${w}%;background:${left < 0 ? 'var(--bad)' : 'var(--ok)'}"></i></div>
-    <p class="small mute" style="margin-top:10px">${st.streak ? `${st.streak}-day streak within target. ` : ''}${st.jar > 0 ? `${rp(st.jar)} unspent from your food target so far.` : ''}</p>
+    <p class="small mute" style="margin-top:10px">${rp(st.target)} daily, ${carryText(st.carryIn)}.${left < 0 ? ` Tomorrow's food budget drops to ${rp(st.target + left)}.` : left > 0 ? ' Anything left rolls into tomorrow.' : ''}${st.streak > 1 ? ` ${st.streak} days in a row within budget.` : ''}</p>
   </section>`;
 }
 
@@ -902,7 +909,8 @@ function nudges(k) {
     out.push({ tone: diffDays(t, b.due) < 0 ? 'bad' : '', ic: '📅', text: `<b>${esc(b.name)}</b> ${rp(b.amount - (b.paidAmount || 0))} is ${diffDays(t, b.due) < 0 ? 'overdue' : diffDays(t, b.due) === 0 ? 'due today' : `due ${fdw(b.due)}`}. Late fees on paylater add up fast.`, act: ['Mark paid', 'bill-pay', b.id] }));
   if (ago === null || ago >= 3) out.push({ ic: '🧮', text: ago === null ? 'You haven\'t done a cycle count yet. It takes a minute and catches forgotten expenses early.' : `Last cycle count was ${ago} days ago. A quick count keeps the numbers honest.`, act: ['Count now', 'count', ''] });
   const st = foodStats(k);
-  if (st && st.jar >= 50000) out.push({ tone: 'good', ic: '🍱', text: `You've kept ${rp(st.jar)} of your food money unspent. Move it to Saving now so it doesn't leak into snacks.`, act: ['Move to savings', 'save', String(Math.floor(st.jar / 1000) * 1000)] });
+  if (st && st.carryIn >= st.target * 3) out.push({ tone: 'good', ic: '🍱', text: `You've built up ${rp(st.carryIn)} of unused food budget, about ${Math.floor(st.carryIn / st.target)} extra days. If you won't need it, lower Food in your plan and that money becomes savings.` });
+  if (st && st.carryIn <= -st.target) out.push({ tone: 'bad', ic: '🍱', text: `Earlier food overspending has taken ${rp(-st.carryIn)} off today's food budget. A cheaper day or two brings it back.` });
   const ready = (S.settings.wishlist || []).filter(w => w.status === 'waiting' && diffDays(w.added, t) >= COOL_OFF_DAYS);
   if (ready.length) out.push({ ic: '🛍️', text: `${ready.length} wishlist item${ready.length > 1 ? 's have' : ' has'} finished the ${COOL_OFF_DAYS}-day cool-off. Still want ${ready.length > 1 ? 'them' : 'it'}?`, act: ['Decide', 'tab', 'savings'] });
   if (k.daysLeft <= 3 && k.projected > 0) out.push({ tone: 'good', ic: '🎯', text: `Payday is ${k.daysLeft} day${k.daysLeft > 1 ? 's' : ''} away. Sweep what's left of the day-to-day budget into Saving before the new cycle starts.`, act: ['Move to savings', 'save', ''] });
@@ -1002,32 +1010,44 @@ function foodStripCard(k) {
   const max = Math.max(st.target * 1.6, ...st.s, 1);
   const bars = st.s.map((v, i) => {
     const fut = k.isCur ? i > st.ti : !k.isPast;
-    const cls = fut ? 'fut' : v === 0 ? '' : v <= st.target ? 'ok' : 'bad';
+    const cls = fut ? 'fut' : v === 0 ? '' : st.over[i] ? 'bad' : 'ok';
     const h = fut ? 4 : Math.max(3, v / max * 80);
-    return `<div title="${fdw(addDays(k.c.start, i))}: ${rp(v)}"><i class="${cls} ${k.isCur && i === st.ti ? 'today' : ''}" style="height:${h}px"></i></div>`;
+    return `<div title="${fdw(addDays(k.c.start, i))}: spent ${rp(v)} of ${rp(st.avail[i])}"><i class="${cls} ${k.isCur && i === st.ti ? 'today' : ''}" style="height:${h}px"></i></div>`;
   }).join('');
-  const past = k.isCur ? st.ti : k.days;
-  const avg = past ? sumA(st.s.slice(0, past)) / past : 0;
+  const avg = st.pastN ? sumA(st.s.slice(0, st.pastN)) / st.pastN : 0;
   return `<section class="card">
-    <div class="card-h"><div><h2>${esc(st.f.name)}, day by day</h2><p>Target ${rp(st.target)} a day</p></div><span class="pill ${st.overDays ? 'watch' : 'ok'}">${st.overDays} day${st.overDays === 1 ? '' : 's'} over</span></div>
-    <div class="strip" role="img" aria-label="Food spending per day, green within target, red above">${bars}</div>
+    <div class="card-h"><div><h2>${esc(st.f.name)}, day by day</h2><p>${rp(st.target)} a day. Leftovers roll into the next day; overspending comes out of it.</p></div><span class="pill ${st.overDays ? 'watch' : 'ok'}">${st.overDays} day${st.overDays === 1 ? '' : 's'} over</span></div>
+    <div class="strip" role="img" aria-label="Food spending per day, green within that day's budget, red above">${bars}</div>
     <div class="strip-axis"><span>${fd(k.c.start)}</span><span>${fd(addDays(k.c.payday, -1))}</span></div>
-    <div class="kv" style="margin-top:12px"><div><small>Daily average so far</small><b class="num">${rp(avg)}</b></div><div><small>Used of ${rp(st.f.total)}</small><b class="num">${rp(st.f.spent)}</b></div></div>
+    <div class="kv" style="margin-top:12px">
+      <div><small>${k.isCur ? "Today's budget" : 'Left at the end'}</small><b class="num">${rp(k.isCur ? st.todayBudget : st.endCarry)}</b></div>
+      <div><small>Carried into today</small><b class="num" style="color:${st.carryIn < 0 ? 'var(--bad)' : 'var(--ok)'}">${k.isCur ? (st.carryIn >= 0 ? '+' : '−') + rp(Math.abs(st.carryIn)) : '–'}</b></div>
+      <div><small>Daily average so far</small><b class="num">${rp(avg)}</b></div>
+      <div><small>Used of ${rp(st.f.total)}</small><b class="num">${rp(st.f.spent)}</b></div>
+    </div>
   </section>`;
 }
 
+/* Fuel with carry-over: each week gets its share PLUS last week's leftover (or MINUS last week's overspend). */
 function fuelCard(k) {
   const f = k.lines.find(l => l.track === 'week' && l.total > 0); if (!f) return '';
-  const weeks = Math.ceil(k.days / 7), perDay = f.total / k.days, s = dailySeries(k, f.name);
+  const weeks = Math.ceil(k.days / 7), perDay = f.base / k.days, s = dailySeries(k, f.name);
   const curW = k.isCur ? Math.floor((k.elapsed - 1) / 7) : -1;
+  let carry = f.topUp || 0;
   const rows = Array.from({ length: weeks }, (_, w) => {
-    const a = w * 7, z = Math.min(k.days, a + 7), budget = perDay * (z - a), spent = sumA(s.slice(a, z));
-    const r = budget ? spent / budget : 0, over = spent > budget;
-    return `<div class="cat" style="cursor:default"><div class="t"><div class="n"><b>Week ${w + 1}${w === curW ? ' (now)' : ''}</b><span>${fd(addDays(k.c.start, a))} – ${fd(addDays(k.c.start, z - 1))}</span></div>
-      <div class="r num"><b>${rp(spent)}</b><span class="mute">of ${rp(budget)}</span></div><span class="pill ${over ? 'over' : 'ok'}">${over ? 'Over' : pct(r)}</span></div>
+    const a = w * 7, z = Math.min(k.days, a + 7), base = perDay * (z - a), spent = sumA(s.slice(a, z));
+    const future = (k.isCur && w > curW) || (!k.isCur && !k.isPast);
+    const budget = future ? base : base + carry;     // future weeks only know their base; carry is added when the week arrives
+    const r = budget > 0 ? spent / budget : (spent ? 2 : 0), over = spent > budget;
+    const note = future ? (w === curW + 1 && carry ? `, plus what's left of this week (${carry > 0 ? '' : '−'}${rp(Math.abs(carry))} so far)` : '')
+      : carry ? ` ${carry > 0 ? '+' : '−'}${rp(Math.abs(carry))} ${carry > 0 ? 'carried in' : 'from overspending'}` : '';
+    const row = `<div class="cat" style="cursor:default"><div class="t"><div class="n"><b>Week ${w + 1}${w === curW ? ' (now)' : ''}</b><span>${fd(addDays(k.c.start, a))} – ${fd(addDays(k.c.start, z - 1))}. Base ${rp(base)}${note}</span></div>
+      <div class="r num"><b>${rp(spent)}</b><span class="mute">of ${rp(budget)}</span></div><span class="pill ${over ? 'over' : future ? '' : 'ok'}">${over ? 'Over' : pct(r)}</span></div>
       <div class="bar"><i style="width:${clamp(r * 100, 0, 100)}%;background:${over ? 'var(--bad)' : colorOf(f.name)}"></i></div></div>`;
+    if (!future) carry = budget - spent;      // finished weeks and this week pass their leftover (or overspend) forward
+    return row;
   }).join('');
-  return `<section class="card"><div class="card-h"><div><h2>${esc(f.name)}, week by week</h2><p>${rp(perDay * 7)} a week</p></div></div>${rows}</section>`;
+  return `<section class="card"><div class="card-h"><div><h2>${esc(f.name)}, week by week</h2><p>${rp(perDay * 7)} a week. Leftovers roll into next week; overspending comes out of it.</p></div></div>${rows}</section>`;
 }
 
 /* ---------- MONEY ---------- */
@@ -1118,12 +1138,13 @@ function viewCalendar() {
   const tots = Object.values(days).map(d => d.tot).filter(Boolean).sort((a, b) => a - b);
   const max = Math.max(1, (tots[Math.floor(tots.length * .8)] || 0) * 1.4);
   const paydays = new Set(S.cycles.map(c => c.start));
-  const st = foodStats(calc(curCycle())), target = st ? st.target : 0;
+  const overMap = {};   // a food day is red when it went over that day's budget (including carry-over)
+  S.cycles.forEach(cy => { const ck = calc(cy), fs = foodStats(ck); if (fs) for (let i = 0; i < fs.pastN + (ck.isCur ? 1 : 0); i++) if (fs.over[i]) overMap[addDays(cy.start, i)] = true; });
   let cells = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => `<div class="cdow">${d[0]}</div>`).join('');
   for (let i = 0; i < lead; i++) cells += '<div></div>';
   for (let i = 1; i <= n; i++) {
     const ds = `${S.calMonth}-${pad(i)}`, d = days[ds] || { tot: 0, food: 0, inc: 0 }, fut = ds > t;
-    const over = target && d.food > target;
+    const over = !!overMap[ds];
     cells += `<button class="cd ${ds === S.calSel ? 'sel' : ''} ${ds === t ? 'now' : ''} ${fut ? 'fut' : ''}" data-act="cal-day" data-d="${ds}"
       aria-label="${fdw(ds)}: spent ${rp(d.tot)}, food ${rp(d.food)}${d.inc ? ', income ' + rp(d.inc) : ''}${paydays.has(ds) ? ', payday' : ''}">
       <span class="dn">${i}${paydays.has(ds) ? '<i class="pay" title="Payday"></i>' : ''}${d.inc ? '<i class="inc" title="Income">+</i>' : ''}</span>
@@ -1148,7 +1169,7 @@ function viewCalendar() {
         </div>
         <div class="calg">${cells}</div>
         <div class="legend lg" style="margin-top:12px"><span><i style="background:var(--ok)"></i>Total spent</span><span><i style="background:var(--food)"></i>Food only</span><span><i style="background:var(--gold)"></i>Payday</span><span><b style="color:var(--ok)">+</b> Income</span></div>
-        <p class="tiny mute" style="margin-top:6px">Days with no spending stay blank.${target ? ` Food turns red on days above your ${rp(target)} daily target.` : ''}</p>
+        <p class="tiny mute" style="margin-top:6px">Days with no spending stay blank. Food turns red on days that went over that day's food budget, including carry-over.</p>
       </section>
       <section class="card">
         <div class="card-h"><div><h2>${label.split(' ')[0]} at a glance</h2><p>Calendar month, all categories</p></div></div>
@@ -1323,7 +1344,7 @@ function aiSummary(c = curCycle()) {
     movedToSavings: k.saved, safeToSpendToday: Math.round(k.safeToday), dayToDayForecast: Math.round(k.forecastFlex), dayToDayBudget: k.flexBudget,
     categories: k.lines.filter(l => l.total || l.spent).map(l => ({ name: l.name, type: l.kind, group: l.group, budget: l.total, spent: l.spent, status: l.status })),
     notInPlan: k.unplanned, bills: (k.c.bills || []).map(b => ({ name: b.name, amount: b.amount, due: b.due, paid: !!b.paid, paidSoFar: b.paidAmount || 0 })),
-    food: st ? { dailyTarget: st.target, todaySpent: st.today, daysOverTarget: st.overDays } : null,
+    food: st ? { rule: 'daily target + carry-over from earlier days (leftover adds, overspend deducts)', dailyTarget: st.target, todaysBudgetWithCarry: k.isCur ? st.todayBudget : null, carriedIntoToday: k.isCur ? st.carryIn : null, todaySpent: st.today, daysOverBudget: st.overDays } : null,
     biggestItems: k.exp.slice().sort((a, b) => b.amount - a.amount).slice(0, 10).map(e => ({ item: e.item, amount: e.amount, category: e.category, date: e.date })),
     goals: (S.settings.goals || []).map(g => ({ name: g.name, target: g.target, saved: g.saved, deadline: g.deadline })),
     lastCount: lc ? { date: lc.date, difference: lc.diff } : null,
@@ -1890,7 +1911,7 @@ function viewRecap() {
   const incr = Object.keys(k.spentBy).map(nm => ({ nm, d: (k.spentBy[nm] || 0) - (prevBy[nm] || 0) })).sort((a, b) => b.d - a.d)[0];
   if (prev && incr && incr.d > 0) H.push(`The biggest increase is <b>${esc(incr.nm)}</b>, ${rp(incr.d)} more than last month.`);
   const st = foodStats(k);
-  if (st) { const past = k.isCur ? st.ti : k.days; if (past) H.push(`Food stayed within ${rp(st.target)} on <b>${past - st.overDays} of ${past}</b> days.`); }
+  if (st && st.pastN) H.push(`Food stayed within each day's budget on <b>${st.pastN - st.overDays} of ${st.pastN}</b> days${k.isCur ? `, and today's food budget is ${rp(st.todayBudget)}` : `, ending with ${st.endCarry >= 0 ? rp(st.endCarry) + ' unused' : rp(-st.endCarry) + ' over'}`}.`);
   if (k.unplanned.length) H.push(`Spending outside the plan: ${k.unplanned.map(u => `${esc(u.name)} ${rp(u.spent)}`).join(', ')}.`);
 
   // categories, biggest first
@@ -2229,11 +2250,16 @@ const ACT = {
     const e = amt < 0 ? entry({ item: 'Unrecorded spending', amount: -amt, category: 'Others' }) : entry({ item: 'Unrecorded income', amount: amt, category: 'Income', type: 'income' });
     commit({ action: 'add', expenses: [e] }); if (S.sheet && S.sheet.kind === 'count') renderSheet(); toast('Logged. The count now matches.', () => commit({ action: 'delete', id: e.id }));
   },
-  'explain-safe': () => { const k = calc(curCycle()), flex = k.lines.filter(l => l.kind === 'flex' && l.total > 0);
+  'explain-safe': () => { const k = calc(curCycle()), flex = k.lines.filter(l => l.kind === 'flex' && l.total > 0), st = foodStats(k);
+    const left = l => Math.max(0, l.total - (l.spent - l.today));
+    const rows = flex.map(l => `<tr><td>${esc(l.name)}</td><td class="num">${rp(left(l))}</td><td class="num">${rp(k.daysLeft ? left(l) / k.daysLeft : 0)}</td></tr>`).join('');
     openSheet('explain', { title: 'Safe to spend today', html: `
-      <p>What's left of your day-to-day budgets, shared evenly over the ${k.daysLeft} days until payday, minus what you've already spent today.</p>
-      <p>Day-to-day budgets: ${flex.map(l => esc(l.name)).join(', ')} (${rp(k.flexBudget)} this cycle). Fixed costs like Boarding and Bills, and buffers like Emergency, are left out because that money is already spoken for.</p>
-      <p>Spend less today and tomorrow's number grows. Spend more and it shrinks. That's the whole system.</p>` }); },
+      <p>This is <b>all your day-to-day budgets together</b>, not just food. What's left of them is shared over the ${k.daysLeft} days until payday, minus what you've already spent today.</p>
+      <table class="table"><thead><tr><th>Category</th><th>Left</th><th>Per day</th></tr></thead><tbody>${rows}
+        <tr><td><b>Total</b></td><td class="num"><b>${rp(sumA(flex.map(left)))}</b></td><td class="num"><b>${rp(k.allowance)}</b></td></tr></tbody></table>
+      <p>Fixed costs (Boarding, Housing, Bills) and buffers (Emergency, Others) are left out because that money is already spoken for.</p>
+      ${st ? `<p><b>Food has its own daily budget with carry-over:</b> ${rp(st.target)} a day, plus leftovers from earlier days or minus earlier overspending. Today's food budget is <b>${rp(st.todayBudget)}</b>.</p>` : ''}
+      <p>The total works the same way: spend less today and tomorrow's number grows; spend more and it shrinks.</p>` }); },
   'explain-count': () => { const k = calc(curCycle());
     openSheet('explain', { title: 'How the cycle count works', html: `
       <p>The app expects your counted accounts to hold:</p>
